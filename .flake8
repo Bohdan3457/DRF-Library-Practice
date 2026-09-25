@@ -1,0 +1,28 @@
+[flake8]
+max-line-length = 79
+exclude =
+    .venv/,
+    */migrations/*,
+    __pycache__,
+    media/,
+    staticfiles/,
+    manage.py,
+    asgi.py,
+    wsgi.py
+ignore =
+    E203,
+    W503,
+    W504,
+    ANN101,
+    ANN102,
+    ANN201,
+    ANN202,
+    ANN001,
+    ANN003,
+    ANN204,
+    Q000,
+    Q001,
+    Q002,
+    Q003
+per-file-ignores =
+    library_service/settings.py: E501
