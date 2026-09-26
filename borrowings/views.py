@@ -1,14 +1,14 @@
 from django.db import transaction
-from rest_framework import viewsets
+from rest_framework import viewsets, status
 from rest_framework.permissions import IsAuthenticated
-from borrowings.models import Borrowing
-from borrowings.serializers import BorrowingSerializer
 from rest_framework.decorators import action
 from rest_framework.response import Response
-from rest_framework import status
 from django.utils import timezone
 
+from borrowings.models import Borrowing
+from borrowings.serializers import BorrowingSerializer
 from payments.models import Payment
+from payments.services import create_stripe_session
 
 
 class BorrowingViewSet(viewsets.ModelViewSet):
@@ -46,23 +46,25 @@ class BorrowingViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST
             )
 
+        if borrowing.payments.filter(
+            status=Payment.StatusChoices.PENDING
+        ).exists():
+            return Response(
+                {
+                    "error": (
+                        "Cannot return the book: "
+                        "there are pending or unpaid payments."
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
         with transaction.atomic():
+            current_date = timezone.now().date()
 
-            borrowing.actual_return_date = timezone.now().date()
-            borrowing.save()
-
-            book = borrowing.book
-            book.inventory += 1
-            book.save()
-
-            serializer = self.get_serializer(borrowing)
-            if (
-                borrowing.actual_return_date
-                > borrowing.expected_return_date
-            ):
+            if current_date > borrowing.expected_return_date:
                 days_overdue = (
-                    borrowing.actual_return_date
-                    - borrowing.expected_return_date
+                    current_date - borrowing.expected_return_date
                 ).days
                 fine_multiplier = 2
                 fine_amount = (
@@ -70,10 +72,20 @@ class BorrowingViewSet(viewsets.ModelViewSet):
                     * borrowing.book.daily_fee
                     * fine_multiplier
                 )
-                Payment.objects.create(
+                fine_payment = Payment.objects.create(
                     status=Payment.StatusChoices.PENDING,
-                    type=Payment.TypeChoices.FINE,
+                    payment_type=Payment.TypeChoices.FINE,
                     borrowing=borrowing,
                     money_to_pay=fine_amount,
                 )
+                create_stripe_session(fine_payment)
+
+            borrowing.actual_return_date = current_date
+            borrowing.save()
+
+            book = borrowing.book
+            book.inventory += 1
+            book.save()
+
+            serializer = self.get_serializer(borrowing)
             return Response(serializer.data, status=status.HTTP_200_OK)
