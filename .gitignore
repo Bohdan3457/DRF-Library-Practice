@@ -16,6 +16,7 @@ staticfiles/
 .env
 .env.local
 .env.*
+!.env.example
 
 *.log
 django_q.log
